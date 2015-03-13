@@ -1,0 +1,11 @@
+http://nil.csail.mit.edu/6.824/2015/labs/lab-1.html
+
+Part III: Handling worker failures
+
+In this part you will make the master handle failed workers. MapReduce makes this relatively easy because workers don't have persistent state. If a worker fails, any RPCs that the master issued to that worker will fail (e.g., due to a timeout). Thus, if the master's RPC to the worker fails, the master should re-assign the job given to the failed worker to another worker.
+
+An RPC failure doesn't necessarily mean that the worker failed; the worker may just be unreachable but still computing. Thus, it may happen that two workers receive the same job and compute it. However, because jobs are idempotent, it doesn't matter if the same job is computed twice---both times it will generate the same output. So, you don't have to anything special for this case. (Our tests never fail workers in the middle of job, so you don't even have to worry about several workers writing to the same output file.)
+
+You don't have to handle failures of the master; we will assume it won't fail. Making the master fault-tolerant is more difficult because it keeps persistent state that would have to be recovered in order to resume operations after a master failure. Much of the later labs are devoted to this challenge.
+
+Your implementation must pass the two remaining test cases in test_test.go. The first case tests the failure of one worker. The second test case tests handling of many failures of workers. Periodically, the test cases start new workers that the master can use to make forward progress, but these workers fail after handling a few jobs. 
