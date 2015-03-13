@@ -1,0 +1,66 @@
+http://nil.csail.mit.edu/6.824/2015/labs/lab-1.html
+
+Geting started
+
+There is an input file kjv12.txt in ~/6.824/src/main, which was downloaded from here. Compile the initial software we provide you and run it with the downloaded input file:
+
+$ add 6.824
+$ export GOPATH=$HOME/6.824
+$ cd ~/6.824/src/main
+$ go run wc.go master kjv12.txt sequential
+# command-line-arguments
+./wc.go:11: missing return at end of function
+./wc.go:15: missing return at end of function
+
+Part I: Word count
+
+Modify Map and Reduce so that wc.go reports the number of occurrences of each word in alphabetical order.
+
+$ go run wc.go master kjv12.txt sequential
+Split kjv12.txt
+Split read 4834757
+DoMap: read split mrtmp.kjv12.txt-0 966954
+DoMap: read split mrtmp.kjv12.txt-1 966953
+DoMap: read split mrtmp.kjv12.txt-2 966951
+DoMap: read split mrtmp.kjv12.txt-3 966955
+DoMap: read split mrtmp.kjv12.txt-4 966944
+DoReduce: read mrtmp.kjv12.txt-0-0
+DoReduce: read mrtmp.kjv12.txt-1-0
+DoReduce: read mrtmp.kjv12.txt-2-0
+DoReduce: read mrtmp.kjv12.txt-3-0
+DoReduce: read mrtmp.kjv12.txt-4-0
+DoReduce: read mrtmp.kjv12.txt-0-1
+DoReduce: read mrtmp.kjv12.txt-1-1
+DoReduce: read mrtmp.kjv12.txt-2-1
+DoReduce: read mrtmp.kjv12.txt-3-1
+DoReduce: read mrtmp.kjv12.txt-4-1
+DoReduce: read mrtmp.kjv12.txt-0-2
+DoReduce: read mrtmp.kjv12.txt-1-2
+DoReduce: read mrtmp.kjv12.txt-2-2
+DoReduce: read mrtmp.kjv12.txt-3-2
+DoReduce: read mrtmp.kjv12.txt-4-2
+Merge phaseMerge: read mrtmp.kjv12.txt-res-0
+Merge: read mrtmp.kjv12.txt-res-1
+Merge: read mrtmp.kjv12.txt-res-2
+
+The output will be in the file "mrtmp.kjv12.txt". Your implementation is correct if the following command produces the following top 10 words: 
+$ sort -n -k2 mrtmp.kjv12.txt | tail -10
+unto: 8940
+he: 9666
+shall: 9760
+in: 12334
+that: 12577
+And: 12846
+to: 13384
+of: 34434
+and: 38850
+the: 62075
+
+To make testing easy for you, run:
+
+$ sh ./test-wc.sh
+
+and it will report if your solution is correct or not. 
+You can remove the output file and all intermediate files with:
+
+$ rm mrtmp.*
