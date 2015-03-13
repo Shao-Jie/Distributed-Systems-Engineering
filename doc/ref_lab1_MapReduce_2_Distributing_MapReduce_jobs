@@ -1,0 +1,29 @@
+http://nil.csail.mit.edu/6.824/2015/labs/lab-1.html
+Part II: Distributing MapReduce jobs
+
+In this part you will complete a version of mapreduce that splits the work up over a set of worker threads, in order to exploit multiple cores. A master thread hands out work to the workers and waits for them to finish. The master should communicate with the workers via RPC. We give you the worker code (mapreduce/worker.go), the code that starts the workers, and code to deal with RPC messages (mapreduce/common.go).
+
+Your job is to complete master.go in the mapreduce package. In particular, you should modify RunMaster() in master.go to hand out the map and reduce jobs to workers, and return only when all the jobs have finished.
+
+Look at Run() in mapreduce.go. It calls Split() to split the input into per-map-job files, then calls your RunMaster() to run the map and reduce jobs, then calls Merge() to assemble the per-reduce-job outputs into a single output file. RunMaster only needs to tell the workers the name of the original input file (mr.file) and the job number; each worker knows from which files to read its input and to which files to write its output.
+
+Each worker sends a Register RPC to the master when it starts. mapreduce.go already implements the master's MapReduce.Register RPC handler for you, and passes the new worker's information to mr.registerChannel. Your RunMaster should process new worker registrations by reading from this channel.
+
+Information about the MapReduce job is in the MapReduce struct, defined in mapreduce.go. Modify the MapReduce struct to keep track of any additional state (e.g., the set of available workers), and initialize this additional state in the InitMapReduce() function. The master does not need to know which Map or Reduce functions are being used for the job; the workers will take care of executing the right code for Map or Reduce.
+
+You should run your code using Go's unit test system. We supply you with a set of tests in test_test.go. You run unit tests in a package directory (e.g., the mapreduce directory) as follows:
+
+$ cd mapreduce
+$ go test
+
+You are done with Part II when your implementation passes the first test (the "Basic mapreduce" test) in test_test.go in the mapreduce package. You don't yet have worry about failures of workers. 
+
+
+
+The master should send RPCs to the workers in parallel so that the workers can work on jobs concurrently. You will find the go statement useful for this purpose and the Go RPC documentation.
+
+The master may have to wait for a worker to finish before it can hand out more jobs. You may find channels useful to synchronize threads that are waiting for reply with the master once the reply arrives. Channels are explained in the document on Concurrency in Go.
+
+The easiest way to track down bugs is to insert log.Printf() statements, collect the output in a file with go test > out, and then think about whether the output matches your understanding of how your code should behave. The last step (thinking) is the most important.
+
+The code we give you runs the workers as threads within a single UNIX process, and can exploit multiple cores on a single machine. Some modifications would be needed in order to run the workers on multiple machines communicating over a network. The RPCs would have to use TCP rather than UNIX-domain sockets; there would need to be a way to start worker processes on all the machines; and all the machines would have to share storage through some kind of network file system. 
