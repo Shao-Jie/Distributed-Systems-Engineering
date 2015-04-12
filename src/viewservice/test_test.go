@@ -9,6 +9,7 @@ import "strconv"
 
 func check(t *testing.T, ck *Clerk, p string, b string, n uint) {
 	view, _ := ck.Get()
+	//fmt.Println(view)
 	if view.Primary != p {
 		t.Fatalf("wanted primary %v, got %v", p, view.Primary)
 	}

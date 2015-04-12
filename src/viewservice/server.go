@@ -18,6 +18,71 @@ type ViewServer struct {
 
 
 	// Your declarations here.
+	View  View       // record current View
+	Witness string   // this var record the third client server
+	timeRecord map[string] int32 // we donot record time directly,
+															// just record times, 0 to DeadPings.
+	Acked  bool  // record the primary whether be acked
+	newView View // if the primary not acked, the new change view will 
+	             // record in newView but not return untill primary acked
+							 // and only be accessed by the primary
+}
+
+
+//
+// server JudgePing  function
+// in this function we judge the Ping Client Pinging
+
+func (vs *ViewServer) JudgePing(args *PingArgs){
+	if args.Viewnum == 0{ // present new connection or crash(reboot)
+		if vs.Acked { // if Primary acked
+			// now start judge whether is crash or reboot
+			if vs.View.Primary == args.Me{ // judge Primary
+				vs.View.Primary = vs.View.Backup // promote backup to primary
+				vs.View.Backup = ""             // noting : witness cannot be primary directly
+				vs.View.Viewnum ++
+				vs.Acked = false
+			}else if vs.View.Backup == args.Me{ // judge Backup
+				vs.View.Backup = vs.Witness    // promote witness to backup
+				vs.Witness = ""
+				vs.View.Viewnum ++
+				vs.Acked = false
+			}else  // now we should judge whether is new connection
+				if len(vs.View.Primary) == 0{ // refresh Primary
+				vs.View.Viewnum ++
+				vs.View.Primary = args.Me
+				vs.Acked = false
+			}else if len(vs.View.Backup) == 0{ // refresh Backup
+				if vs.View.Primary != args.Me {
+					vs.View.Viewnum ++
+					vs.View.Backup = args.Me
+					vs.Acked = false
+				}
+			}else if len(vs.Witness) == 0{ // refresh Witness
+				if vs.View.Primary != args.Me && vs.View.Backup != args.Me{
+					vs.Witness = args.Me
+				}
+			}
+
+		}else{  // not acked,but have connect we should record in newView
+						// noting : we cannot refresh Primary.
+			if len(vs.View.Backup) == 0{
+				vs.newView.Viewnum = vs.View.Viewnum + 1
+				vs.newView.Primary = vs.View.Primary
+				vs.newView.Backup = args.Me
+				vs.Witness = ""
+			}else if len(vs.Witness) == 0{
+				vs.Witness = args.Me
+			}
+		}
+	}else if args.Viewnum == vs.View.Viewnum{
+		if args.Me == vs.View.Primary{ // now, the Primary is acked
+			vs.Acked = true // refresh Acked
+			if vs.View.Viewnum < vs.newView.Viewnum{ // if we have remaind View,
+					vs.View = vs.newView                // refresh it.
+			}
+		}
+	}
 }
 
 //
@@ -26,7 +91,11 @@ type ViewServer struct {
 func (vs *ViewServer) Ping(args *PingArgs, reply *PingReply) error {
 
 	// Your code here.
-
+	vs.mu.Lock()
+	vs.timeRecord[args.Me] = DeadPings // in this we need refresh timerecord
+	vs.JudgePing(args)       // judge ping
+	vs.mu.Unlock()
+	reply.View = vs.View
 	return nil
 }
 
@@ -36,7 +105,11 @@ func (vs *ViewServer) Ping(args *PingArgs, reply *PingReply) error {
 func (vs *ViewServer) Get(args *GetArgs, reply *GetReply) error {
 
 	// Your code here.
+	reply.View = vs.View
 
+	//reply.View.Viewnum = vs.View.Viewnum
+	//reply.View.Primary = vs.View.Primary
+	//reply.View.Backup = vs.View.Backup
 	return nil
 }
 
@@ -49,6 +122,65 @@ func (vs *ViewServer) Get(args *GetArgs, reply *GetReply) error {
 func (vs *ViewServer) tick() {
 
 	// Your code here.
+	pFlag := 2   // record Primary state
+							 // 2 : inited
+							 // 1 : we have this identity
+							 // 0 : this identity is timeout
+	bFlag := 2   // record Backup state
+	wFlag := 2   // record Witness state
+	changed := 0 // record whether view have been changed
+	vs.mu.Lock()
+	if len(vs.View.Primary) != 0{
+		vs.timeRecord[vs.View.Primary] --
+		pFlag = 1                      // present we have Primary
+		if vs.timeRecord[vs.View.Primary] <= 0{
+			pFlag = 0                    // record Primary have dead
+		}
+	}
+	if len(vs.View.Backup) != 0{
+		vs.timeRecord[vs.View.Backup] --
+		bFlag = 1
+		if vs.timeRecord[vs.View.Backup] <= 0{
+			bFlag = 0
+		}
+	}
+	if len(vs.Witness) != 0{
+		vs.timeRecord[vs.Witness] --
+		wFlag = 1
+		if vs.timeRecord[vs.Witness] <= 0{
+			wFlag = 0
+		}
+	}
+	// now, we judge whether some identities have timeout,and should change.
+	if vs.Acked{ // this change must be happend when acked.
+		if pFlag == 0{ // the primary has timeout
+			if bFlag == 1{ // but we have backup
+				delete(vs.timeRecord,vs.View.Primary)
+				vs.View.Primary = vs.View.Backup // promote backup
+				changed = 1  // now,this view is changed
+				if wFlag == 1{ // promote witness to backup
+											 // noting : witness cannot be primary directly 
+					vs.View.Backup = vs.Witness
+					vs.Witness = ""
+				}else{
+					vs.View.Backup = ""
+				}
+			}
+		}
+
+		if bFlag == 0{
+			if wFlag == 1{
+				delete(vs.timeRecord,vs.View.Backup)
+				vs.View.Backup = vs.Witness
+				vs.Witness = ""
+				changed = 1
+			}
+		}
+		if changed == 1{
+			vs.View.Viewnum ++
+		}
+	}
+	vs.mu.Unlock()
 }
 
 //
@@ -77,7 +209,8 @@ func StartServer(me string) *ViewServer {
 	vs := new(ViewServer)
 	vs.me = me
 	// Your vs.* initializations here.
-
+	vs.timeRecord = make(map[string]int32)
+	vs.Acked = true
 	// tell net/rpc about our RPC server and handlers.
 	rpcs := rpc.NewServer()
 	rpcs.Register(vs)
