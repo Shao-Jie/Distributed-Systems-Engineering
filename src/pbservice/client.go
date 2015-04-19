@@ -3,14 +3,14 @@ package pbservice
 import "viewservice"
 import "net/rpc"
 import "fmt"
-
 import "crypto/rand"
 import "math/big"
-
+//import "strings"
 
 type Clerk struct {
 	vs *viewservice.Clerk
 	// Your declarations here
+	Primary string
 }
 
 // this may come in handy.
@@ -29,6 +29,18 @@ func MakeClerk(vshost string, me string) *Clerk {
 	return ck
 }
 
+func (ck *Clerk)GetPrimary() bool{
+	args := &viewservice.GetArgs{}
+	var reply viewservice.GetReply
+	ok := call(ck.vs.GetServer(),"ViewServer.Get",args,&reply)
+	if ok == false{
+		fmt.Errorf("Get primary error!")
+		return false
+	}else{
+		ck.Primary = reply.View.Primary
+	}
+	return true
+}
 
 //
 // call() sends an RPC to the rpcname handler on server srv
@@ -71,11 +83,39 @@ func call(srv string, rpcname string,
 // primary replies with the value or the primary
 // says the key doesn't exist (has never been Put().
 //
+
+
 func (ck *Clerk) Get(key string) string {
 
 	// Your code here.
-
-	return "???"
+	args := &GetArgs{}
+	args.Key = key
+	args.OpID = nrand()
+	reply := &GetReply{}
+	for true { // we cannot get the value once
+		if len(ck.Primary) == 0{
+			ck.GetPrimary()
+		}
+		ok :=	call(ck.Primary,"PBServer.Get",args,reply)
+		if ok == false { // if cannot connect primary we should get new primary.
+			live := ck.GetPrimary()
+			if live == false{ // the viewserver is down, this test is over.
+				return ErrViewServerDown
+			}
+		}else if reply.Err == ErrWrongServer{
+			live := ck.GetPrimary()
+			if live == false{
+				return ErrViewServerDown
+			}
+		}else if reply.Err == ErrNoKey {
+			return ErrNoKey
+		}else if reply.Err == ErrAlreadyOpID{ // maybe the net is unreliable and cannot return value but record OpID
+			args.OpID = nrand()
+		}else if reply.Err == OK{
+			return reply.Value
+		}
+	}
+	return ""
 }
 
 //
@@ -84,6 +124,31 @@ func (ck *Clerk) Get(key string) string {
 func (ck *Clerk) PutAppend(key string, value string, op string) {
 
 	// Your code here.
+	args := &PutAppendArgs{}
+	args.Key = key
+	args.Value = value
+	args.Op = op
+	args.OpID = nrand()
+	reply := &PutAppendReply{}
+	for true { // we connot put successful just once.
+		if len(ck.Primary) == 0{
+			ck.GetPrimary()
+		}
+		ok := call(ck.Primary,"PBServer.PutAppend",args,reply)
+		if ok == false{
+			live := ck.GetPrimary()
+			if live == false{ // when the viewserver is down, this test is over
+				break
+			}
+		}else if reply.Err == ErrWrongServer{
+			live := ck.GetPrimary()
+			if live == false{
+				break
+			}
+		}else if reply.Err == OK || reply.Err == ErrAlreadyOpID{ // if put successful or have put, break.
+			break
+		}
+	}
 }
 
 //

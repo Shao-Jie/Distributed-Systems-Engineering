@@ -86,3 +86,11 @@ func (ck *Clerk) Primary() string {
 	}
 	return ""
 }
+
+func (ck *Clerk) GetMe() string{
+	return ck.me
+}
+
+func (ck *Clerk) GetServer() string{
+	return ck.server
+}

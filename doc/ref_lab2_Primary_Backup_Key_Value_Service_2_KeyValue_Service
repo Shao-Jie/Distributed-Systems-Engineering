@@ -1,0 +1,114 @@
+Part B: The primary/backup key/value service
+
+The primary/backup key/value server source is in pbservice. We supply you with part of a client interface in pbservice/client.go, and part of the server in pbservice/server.go. Clients use the service by creating a Clerk object (see client.go) and calling its methods, which send RPCs to the service.
+
+Your key/value service should continue operating correctly as long as there has never been a time at which no server was alive. It should also operate correctly with partitions: a server that suffers temporary network failure without crashing, or can talk to some computers but not others. If your service is operating with just one server, it should be able to incorporate a recovered or idle server (as backup), so that it can then tolerate another server failure.
+
+Correct operation means that calls to Clerk.Get(k) return the latest value set by a successful call to Clerk.Put(k,v) or Clerk.Append(k,v), or an empty string if the key has never seen either. All operations should provide at-most-once semantics (see lectures 2 and 3).
+
+You should assume that the viewservice never halts or crashes.
+
+Your clients and servers may only communicate using RPC, and both clients and servers must send RPCs with the call() function in client.go.
+
+It's crucial that only one primary be active at any given time. You should have a clear story worked out for why that's the case for your design. A danger: suppose in some view S1 is the primary; the viewservice changes views so that S2 is the primary; but S1 hasn't yet heard about the new view and thinks it is still primary. Then some clients might talk to S1, and others talk to S2, and not see each others' Put()s.
+
+A server that isn't the active primary should either not respond to clients, or respond with an error: it should set GetReply.Err or PutReply.Err to something other than OK.
+
+Clerk.Get(), Clerk.Put(), and Clerk.Append() should only return when they have completed the operation. That is, Put()/Append() should keep trying until they have updated the key/value database, and Clerk.Get() should keep trying until it has retrieved the current value for the key (if any). Your server must filter out the duplicate RPCs that these client re-tries will generate to ensure at-most-once semantics for operations. You can assume that each clerk has only one outstanding Put or Get. Think carefully about what the commit point is for a Put.
+
+A server should not talk to the viewservice for every Put/Get it receives, since that would put the viewservice on the critical path for performance and fault-tolerance. Instead servers should Ping the viewservice periodically (in pbservice/server.go's tick()) to learn about new views. Similarly, the client Clerk should not talk to the viewservice for every RPC it sends; instead, the Clerk should cache the current primary, and only talk to the viewservice when the current primary seems to be dead. 
+
+ Part of your one-primary-at-a-time strategy should rely on the viewservice only promoting the backup from view i to be primary in view i+1. If the old primary from view i tries to handle a client request, it will forward it to its backup. If that backup hasn't heard about view i+1, then it's not acting as primary yet, so no harm done. If the backup has heard about view i+1 and is acting as primary, it knows enough to reject the old primary's forwarded client requests.
+
+You'll need to ensure that the backup sees every update to the key/value database, by a combination of the primary initializing it with the complete key/value database and forwarding subsequent client operations. Your primary should forward just the arguments to each Append() to the backup; do not forward the resulting value, which might be large.
+
+The skeleton code for the key/value servers is in src/pbservice. It uses your viewservice, so you'll have to set up your GOPATH as follows:
+
+$ export GOPATH=$HOME/6.824
+$ cd ~/6.824/src/pbservice
+$ go test -i
+$ go test
+Single primary, no backup: --- FAIL: TestBasicFail (2.00 seconds)
+        test_test.go:50: first primary never formed view
+--- FAIL: TestFailPut (5.55 seconds)
+        test_test.go:165: wrong primary or backup
+Concurrent Put()s to the same key: --- FAIL: TestConcurrentSame (8.51 seconds)
+...
+Partition an old primary: --- FAIL: TestPartition (3.52 seconds)
+        test_test.go:354: wrong primary or backup
+...
+$
+
+Here's a recommended plan of attack: 
+
+
+    1.You should start by modifying pbservice/server.go to Ping the viewservice to find the current view. Do this in the tick() function. Once a server knows the current view, it knows if it is the primary, the backup, or neither.
+    2.Implement Get, Put, and Append handlers in pbservice/server.go; store keys and values in a map[string]string. If a key does not exist, Append should use an empty string for the previous value. Implement the client.go RPC stubs.
+    3.Modify your handlers so that the primary forwards updates to the backup.
+    4.When a server becomes the backup in a new view, the primary should send it the primary's complete key/value database.
+    5.Modify client.go so that clients keep re-trying until they get an answer. Make sure that you include enough information in PutAppendArgs, and GetArgs (see common.go) so that the key/value service can detect duplicates. Modify the key/value service to handle duplicates correctly.
+    6.Modify client.go to cope with a failed primary. If the current primary doesn't respond, or doesn't think it's the primary, have the client consult the viewservice (in case the primary has changed) and try again. Sleep for viewservice.PingInterval between re-tries to avoid burning up too much CPU time. 
+
+You're done if you can pass all the pbservice tests: 
+
+$ cd ~/6.824/src/pbservice
+$ go test
+Test: Single primary, no backup ...
+  ... Passed
+Test: Add a backup ...
+  ... Passed
+Test: Primary failure ...
+  ... Passed
+Test: Kill last server, new one should not be active ...
+  ... Passed
+Test: at-most-once Put; unreliable ...
+  ... Passed
+Test: Put() immediately after backup failure ...
+  ... Passed
+Test: Put() immediately after primary failure ...
+  ... Passed
+Test: Concurrent Put()s to the same key ...
+  ... Passed
+Test: Concurrent Put()s to the same key; unreliable ...
+  ... Passed
+Test: Repeated failures/restarts ...
+  ... Put/Gets done ... 
+  ... Passed
+Test: Repeated failures/restarts; unreliable ...
+  ... Put/Gets done ... 
+  ... Passed
+Test: Old primary does not serve Gets ...
+  ... Passed
+Test: Partitioned old primary does not complete Gets ...
+  ... Passed
+PASS
+ok      pbservice       113.352s
+
+$
+
+You'll see some "method Kill has wrong number of ins" complaints and lots of "rpc: client protocol error" and "rpc: writing response" complaints; ignore them.
+
+Hint: you'll probably need to create new RPCs to forward client requests from primary to backup, since the backup should reject a direct client request but should accept a forwarded request.
+
+Hint: you'll probably need to create new RPCs to handle the transfer of the complete key/value database from the primary to a new backup. You can send the whole database in one RPC (for example, include a map[string]string in the RPC arguments).
+
+Hint: the state to filter duplicates must be replicated along with the key/value state.
+
+Hint: the tester arranges for RPC replies to be lost in tests whose description includes "unreliable". This will cause RPCs to be executed by the receiver, but since the sender sees no reply, it cannot tell whether the server executed the RPC.
+
+Hint: you may need to generate numbers that have a high probability of being unique. Try this:
+
+import "crypto/rand"
+import "math/big"
+func nrand() int64 {
+  max := big.NewInt(int64(1) << 62)
+  bigx, _ := rand.Int(rand.Reader, max)
+  x := bigx.Int64()
+  return x
+}
+
+Hint: the tests kill a server by setting its dead flag. You must make sure that your server terminates correctly when that flag is set, otherwise you may fail to complete the test cases.
+
+Hint: even if your viewserver passed all the tests in Part A, it may still have bugs that cause failures in Part B.
+
+Hint: study the test cases before you start programming 

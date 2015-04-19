@@ -35,6 +35,7 @@ type ViewServer struct {
 
 func (vs *ViewServer) JudgePing(args *PingArgs){
 	if args.Viewnum == 0{ // present new connection or crash(reboot)
+//	if args.Viewnum ==0 || args.Viewnum < vs.View.Viewnum { // present new connection or crash(reboot)
 		if vs.Acked { // if Primary acked
 			// now start judge whether is crash or reboot
 			if vs.View.Primary == args.Me{ // judge Primary
@@ -66,7 +67,7 @@ func (vs *ViewServer) JudgePing(args *PingArgs){
 
 		}else{  // not acked,but have connect we should record in newView
 						// noting : we cannot refresh Primary.
-			if len(vs.View.Backup) == 0{
+			if len(vs.View.Backup) == 0 && len(vs.newView.Backup) == 0{
 				vs.newView.Viewnum = vs.View.Viewnum + 1
 				vs.newView.Primary = vs.View.Primary
 				vs.newView.Backup = args.Me
@@ -80,6 +81,9 @@ func (vs *ViewServer) JudgePing(args *PingArgs){
 			vs.Acked = true // refresh Acked
 			if vs.View.Viewnum < vs.newView.Viewnum{ // if we have remaind View,
 					vs.View = vs.newView                // refresh it.
+					vs.newView.Viewnum = 0
+					vs.newView.Primary = ""
+					vs.newView.Backup = ""
 			}
 		}
 	}
@@ -94,8 +98,8 @@ func (vs *ViewServer) Ping(args *PingArgs, reply *PingReply) error {
 	vs.mu.Lock()
 	vs.timeRecord[args.Me] = DeadPings // in this we need refresh timerecord
 	vs.JudgePing(args)       // judge ping
-	vs.mu.Unlock()
 	reply.View = vs.View
+	vs.mu.Unlock()
 	return nil
 }
 
@@ -122,6 +126,7 @@ func (vs *ViewServer) Get(args *GetArgs, reply *GetReply) error {
 func (vs *ViewServer) tick() {
 
 	// Your code here.
+	vs.mu.Lock()
 	pFlag := 2   // record Primary state
 							 // 2 : inited
 							 // 1 : we have this identity
@@ -129,7 +134,6 @@ func (vs *ViewServer) tick() {
 	bFlag := 2   // record Backup state
 	wFlag := 2   // record Witness state
 	changed := 0 // record whether view have been changed
-	vs.mu.Lock()
 	if len(vs.View.Primary) != 0{
 		vs.timeRecord[vs.View.Primary] --
 		pFlag = 1                      // present we have Primary
@@ -210,7 +214,7 @@ func StartServer(me string) *ViewServer {
 	vs.me = me
 	// Your vs.* initializations here.
 	vs.timeRecord = make(map[string]int32)
-	vs.Acked = true
+	vs.Acked = true  // init this viewserver have acked. prepare for first ping
 	// tell net/rpc about our RPC server and handlers.
 	rpcs := rpc.NewServer()
 	rpcs.Register(vs)
