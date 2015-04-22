@@ -5,7 +5,6 @@ import "net/rpc"
 import "fmt"
 import "crypto/rand"
 import "math/big"
-//import "strings"
 
 type Clerk struct {
 	vs *viewservice.Clerk

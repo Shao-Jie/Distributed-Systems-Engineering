@@ -38,26 +38,17 @@ func (pb *PBServer) JudgeViewChanged(viewnum uint) bool {
 func (pb *PBServer) Forward(args *ForwardArgs,reply *ForwardReply) error {
 	pb.mu.Lock()   // this may happen concurrent. so should a lock.
 	if pb.JudgeViewChanged(args.Viewnum) == false { // the view not change
-		 _,ok := pb.OpID[args.OpID] // judge have operated this Op 
-		 if ok == true{            // if have operated it, return
-				reply.Err = ErrAlreadyOpID
-				pb.mu.Unlock()
-				return nil
-		 }
 		switch args.Op {  //judge operate
 			case "Get":
 				break
-			case "Put":
+			case "Put":  // we have let put and append be the one put
 				pb.Data[args.Key] = args.Value
-				break
-			case "Append":
-			  pb.Data[args.Key] += args.Value
 				break
 			default:
 				break
 		}
 		reply.Err = OK
-		pb.OpID[args.OpID] = true
+		pb.OpID[args.OpID] = true // record 
 	}else{ // if view changed, the server has requested,may not be primary. 
 		reply.Err = ErrWrongServer // so we should return wrong server, until the view not change.
 	}
@@ -74,7 +65,7 @@ func (pb *PBServer) Get(args *GetArgs, reply *GetReply) error {
 		pb.mu.Unlock()
 		return nil
 	}else{
-		_,v := pb.OpID[args.OpID] 
+		_,v := pb.OpID[args.OpID]
 		if v == true{  // if have dealed it, return 
 			reply.Err = ErrAlreadyOpID
 			pb.mu.Unlock()
@@ -123,41 +114,42 @@ func (pb *PBServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) error 
 		pb.mu.Unlock()
 		return nil
 	}else{
-		_,v := pb.OpID[args.OpID]
-		if v == true{
-			reply.Err = ErrAlreadyOpID
-			pb.mu.Unlock()
-			return nil
-		}
-		
 		// need transfer to backup
 		forwardArgs := &ForwardArgs{}
-		forwardArgs.Key = args.Key
-		forwardArgs.Value = args.Value
-		forwardArgs.Op = args.Op
-		forwardArgs.OpID = args.OpID
-		forwardArgs.Viewnum = pb.View.Viewnum
 		forwardReply := &ForwardReply{}
-		if len(pb.View.Backup) != 0{
-			cok := call(pb.View.Backup,"PBServer.Forward",forwardArgs,forwardReply)
-			if cok == false{
-				reply.Err = ErrWrongServer // may network partition or not realiable
+		for true{
+			pb.mu.Unlock() // because this is a loop, this function cannot hold the lock always
+			pb.mu.Lock()  // then locked
+			_,v := pb.OpID[args.OpID]
+			if v == true{  // if we have operated it,
+				reply.Err = ErrAlreadyOpID // return ErralreadyOpID
 				pb.mu.Unlock()
 				return nil
 			}
+			forwardArgs.Op = "Put"// args.Op only be put
+			forwardArgs.Key = args.Key
+			if args.Op == "Put"{
+				forwardArgs.Value = args.Value
+			}else{
+				forwardArgs.Value = pb.Data[args.Key] + args.Value // this is append, we append in this function directly,
+			}                                                    // so in forward,we only change value with put
+			forwardArgs.OpID = args.OpID
+			forwardArgs.Viewnum = pb.View.Viewnum
+			if len(pb.View.Backup) != 0{ // this backup maybe not change in the next loop,becauce network partition or unrealible
+				cok := call(pb.View.Backup,"PBServer.Forward",forwardArgs,forwardReply)
+				if cok == true{ // if we connect successful, then break
+					break
+				}
+			}else{ // if no backup, then break
+				break
+			}
 		}
-		if forwardReply.Err == ErrWrongServer{
+		if forwardReply.Err == ErrWrongServer{ // the view have changed,return ErrWrongServer
 			reply.Err = ErrWrongServer
 			pb.mu.Unlock()
 			return nil
 		}
-		if forwardReply.Err == ErrAlreadyOpID{ // this may  happen in the network are not realiable,
-																					 // the backup have operate it, but the primary not,because "cok"
-			reply.Err = ErrAlreadyOpID
-//			pb.mu.Unlock()   
-//			return nil                     //  !!! cannot return because this primary have not operated!!1
-			
-		}
+		// if all successful, change the value of primary
 		if args.Op == "Put"{
 			pb.Data[args.Key] = args.Value
 			pb.OpID[args.OpID] = true

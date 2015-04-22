@@ -87,10 +87,8 @@ func (ck *Clerk) Primary() string {
 	return ""
 }
 
-func (ck *Clerk) GetMe() string{
-	return ck.me
-}
 
+// because server is private variable,so we need a public function to get it.
 func (ck *Clerk) GetServer() string{
 	return ck.server
 }
