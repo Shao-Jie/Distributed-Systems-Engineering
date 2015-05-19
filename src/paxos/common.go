@@ -30,7 +30,7 @@ type AcceptArgs struct{
 
 type AcceptReply struct{
 	Err Err
-	MaxSeq int // if rejects return the maxSeq
+	MaxSeq int // return the maxSeq
 	LearnVal interface{} // if be decided return learnVal
 }
 

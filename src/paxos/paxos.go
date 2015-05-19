@@ -57,6 +57,7 @@ type Proposal struct{
 	val interface{} // proposal value. 
 	preNum int // record how many peers reply in prepare phase
 	accNum int // record how many peers reply in accept phase
+	maxAccNum map[int]int // the maxAccNum num have seen 
 	majority int // define the majority
 }
 
@@ -219,6 +220,7 @@ func (px *Paxos) AcceptHandle(args *AcceptArgs,reply *AcceptReply) error{
 	}
 	if args.Seq >= px.acceptor.maxSeq[args.Ins]{ // update acceptseq and maxseq acceptval
 		reply.Err = ACC
+		reply.MaxSeq = px.acceptor.maxSeq[args.Ins]
 		px.acceptor.acceptSeq[args.Ins] = args.Seq
 		px.acceptor.acceptVal[args.Ins] = args.Val
 		px.acceptor.maxSeq[args.Ins] = args.Seq
@@ -244,9 +246,17 @@ func (px *Paxos) Accept(des int, proposal *Proposal){
 	}
 	px.mu.Lock()
 	defer px.mu.Unlock()
+	if acceptReply.MaxSeq > proposal.maxAccSeq{ // if acceptReply lager than maxaccSeq,update it
+		proposal.maxAccSeq = acceptReply.MaxSeq
+	}
 	if acceptReply.Err == ACC { // if acc acceptNum increase
 		proposal.accNum ++
-		if proposal.accNum == proposal.majority{ // when accnum equal majority, start decide
+		if proposal.maxAccNum == nil {
+			proposal.maxAccNum = make(map[int]int)
+		}
+		proposal.maxAccNum[proposal.maxAccSeq] ++
+//		if proposal.accNum == proposal.majority{ // when accnum equal majority, start decide
+		if proposal.maxAccNum[proposal.maxAccSeq] == proposal.majority{
 			for i := 0; i < len(px.peers); i++{
 				go px.Learn(i,proposal.ins,proposal.val)
 			}
@@ -270,16 +280,21 @@ func (px *Paxos) LearnHandler(args *LearnArgs,reply *LearnReply)error{
 		px.maxIns = args.Ins
 	}
 	if val,ok:= px.learner.learnVal[args.Ins];ok{
+//		fmt.Println("Aready Exit!")
+//		fmt.Println("px.me  is --, peer is --, args.Ins is--",px.me,args.Peer,args.Ins)
 		if val != args.Val{ // this may happen??
+			fmt.Println("me.val is --,,peer.val is--",val,args.Val)
 			fmt.Println("!!!!!!!!!!!!!!!!!!!!!!!!!!!ERROR!!!!!!!!!!!!!!!!!!1")
 		}
-		return nil
+//		return nil
 	}
 	px.learner.learnVal[args.Ins] = args.Val
 	px.learner.learnValBool[args.Ins] = true
 	if px.learner.maxIns < args.Ins{ // update learn maxIns
 		px.learner.maxIns = args.Ins
 	}
+//	fmt.Println("first in learnHandle px.me is --, peer is --,ins is --,doneInEachPeer is--",px.me,args.Peer,args.Ins,px.doneInEachPeer)
+//	fmt.Println("the peer DoneIns is ",args.DoneIns)
 	if val,ok:= px.doneInEachPeer[args.Peer];ok{
 		if val < args.DoneIns{
 			px.doneInEachPeer[args.Peer] = args.DoneIns // update other peers' doneIns
@@ -287,6 +302,7 @@ func (px *Paxos) LearnHandler(args *LearnArgs,reply *LearnReply)error{
 	}else{
 		px.doneInEachPeer[args.Peer] = args.DoneIns
 	}
+//	fmt.Println("then  in learnHandle px.me is --, peer is --,ins is --,doneInEachPeer is--",px.me,args.Peer,args.Ins,px.doneInEachPeer)
 	return nil
 }
 
@@ -371,7 +387,13 @@ func (px *Paxos) Done(seq int) {
 			seq = ins
 		}
 	}
+//	fmt.Println("doneIneachpeer = ",px.doneInEachPeer)
+//	fmt.Println("learner.learnPeer = ",px.learner.learnPeer)
+//	fmt.Println("learner.learnvalBool = ",px.learner.learnValBool)
+//	fmt.Println("in peer %v  DoneHandle,seq = ",px.me,seq)
 	px.doneInEachPeer[px.me] = seq
+//	fmt.Println("doneIneachpeer = ",px.doneInEachPeer)
+//	fmt.Println("\n")
 	for i := 0; i <= seq ;i++{ // release the resource
 		delete(px.proposer.maxSeq,i)
 		delete(px.proposer.proposals,i)
@@ -448,7 +470,7 @@ func (px *Paxos) Min() int {
 		}
 		return min + 1 // return min+!
 	}else{
-		return 0
+		return -1
 	}
 }
 
@@ -464,6 +486,7 @@ func (px *Paxos) Status(seq int) (Fate, interface{}) {
 	min := px.Min()
 	px.mu.Lock()
 	defer px.mu.Unlock()
+	fmt.Println("in paxos px.me -- learnVal",px.me,px.learner.learnVal)
 	if px.isdead() == false{
 		ins := seq
 		if ins < min{
