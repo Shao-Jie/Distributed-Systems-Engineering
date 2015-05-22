@@ -1,0 +1,45 @@
+ref:
+http://nil.csail.mit.edu/6.824/2015/labs/lab-3.html
+
+Part B: Paxos-based Key/Value Server
+
+Now you'll build kvpaxos, a fault-tolerant key/value storage system. You'll modify kvpaxos/client.go, kvpaxos/common.go, and kvpaxos/server.go.
+Your kvpaxos replicas should stay identical; the only exception is that some replicas may lag others if they are not reachable. If a replica isn't reachable for a while, but then starts being reachable, it should eventually catch up (learn about operations that it missed).
+
+Your kvpaxos client code should try different replicas it knows about until one responds. A kvpaxos replica that is part of a majority of replicas that can all reach each other should be able to serve client requests.
+
+Your storage system must provide sequential consistency to applications that use its client interface. That is, completed application calls to the Clerk.Get(), Clerk.Put(), and Clerk.Append() methods in kvpaxos/client.go must appear to have affected all replicas in the same order and have at-most-once semantics. A Clerk.Get() should see the value written by the most recent Clerk.Put() or Clerk.Append() (in that order) to the same key. One consequence of this is that you must ensure that each application call to Clerk.Put() or Clerk.Append() must appear in that order just once (i.e., write the key/value database just once), even though internally your client.go may have to send RPCs multiple times until it finds a kvpaxos server replica that replies.
+
+Here's a reasonable plan:
+
+Fill in the Op struct in server.go with the "value" information that kvpaxos will use Paxos to agree on, for each client request. Op field names must start with capital letters. You should use Op structs as the agreed-on values -- for example, you should pass Op structs to Paxos Start(). Go's RPC can marshall/unmarshall Op structs; the call to gob.Register() in StartServer() teaches it how.
+Implement the PutAppend() handler in server.go. It should enter a Put or Append Op in the Paxos log (i.e., use Paxos to allocate a Paxos instance, whose value includes the key and value (so that other kvpaxoses know about the Put() or Append())). An Append Paxos log entry should contain the Append's arguments, but not the resulting value, since the result might be large.
+Implement a Get() handler. It should enter a Get Op in the Paxos log, and then "interpret" the the log before that point to make sure its key/value database reflects all recent Put()s.
+Add code to cope with duplicate client requests, including situations where the client sends a request to one kvpaxos replica, times out waiting for a reply, and re-sends the request to a different replica. The client request should execute just once. Please make sure that your scheme for duplicate detection frees server memory quickly, for example by having the client tell the servers which RPCs it has heard a reply for. It's OK to piggyback this information on the next client request.
+Hint: your server should try to assign the next available Paxos instance (sequence number) to each incoming client RPC. However, some other kvpaxos replica may also be trying to use that instance for a different client's operation. So the kvpaxos server has to be prepared to try different instances.
+
+Hint: your kvpaxos servers should not directly communicate; they should only interact with each other through the Paxos log.
+
+Hint: as in Lab 2, you will need to uniquely identify client operations to ensure that they execute just once. Also as in Lab 2, you can assume that each clerk has only one outstanding Put, Get, or Append.
+
+Hint: a kvpaxos server should not complete a Get() RPC if it is not part of a majority (so that it does not serve stale data). This means that each Get() (as well as each Put() and Append()) must involve Paxos agreement.
+
+Hint: don't forget to call the Paxos Done() method when a kvpaxos has processed an instance and will no longer need it or any previous instance.
+
+Hint: your code will need to wait for Paxos instances to complete agreement. The only way to do this is to periodically call Status(), sleeping between calls. How long to sleep? A good plan is to check quickly at first, and then more slowly:
+
+  to := 10 * time.Millisecond
+  for {
+    status, _ := kv.px.Status(seq)
+    if status == paxos.Decided{
+      ...
+      return 
+    }
+    time.Sleep(to)
+    if to < 10 * time.Second {
+      to *= 2
+    }
+  }
+Hint: if one of your kvpaxos servers falls behind (i.e. did not participate in the agreement for some instance), it will later need to find out what (if anything) was agree to. A reasonable way to to this is to call Start(), which will either discover the previously agreed-to value, or cause agreement to happen. Think about what value would be reasonable to pass to Start() in this situation.
+
+Hint: When the test fails, check for gob error (e.g. "rpc: writing response: gob: type not registered for interface ...") in the log because go doesn't consider the error fatal, although it is fatal for the lab.
